@@ -65,28 +65,36 @@ ${_orderedfiles}"
 	fi
 }
 
-autoenv_hashline() {
-	local _envfile _hash
-	_envfile="${1}"
-	_hash=$(autoenv_shasum "${_envfile}" | \cut -d' ' -f 1)
-	\echo "${_envfile}:${_hash}"
+autoenv_hash() {
+	autoenv_shasum "${1}" | \cut -d' ' -f 1
 }
 
 autoenv_check_authz() {
 	local _envfile _hash
 	_envfile="${1}"
-	_hash=$(autoenv_hashline "${_envfile}")
+	_hash=$(autoenv_hash "${_envfile}")
 	\touch "${AUTOENV_AUTH_FILE}"
-	\grep -Gq "${_hash}" "${AUTOENV_AUTH_FILE}"
+	# Allowed to run
+	\grep -Gq "^\\(\\|y:\\)${_envfile}:\\(${_hash}\\|SKIP\\)$" "${AUTOENV_AUTH_FILE}" && return 0
+	# Explicitly disallowed to run
+	\grep -Gq "^n:${_envfile}:\\(${_hash}\\|SKIP\\)$" "${AUTOENV_AUTH_FILE}" && return 2
+	# Not known yet
+	return 1
 }
 
 autoenv_check_authz_and_run() {
 	local _envfile
 	_envfile="${1}"
-	if autoenv_check_authz "${_envfile}"; then
-		autoenv_source "${_envfile}"
-		\return 0
-	fi
+	autoenv_check_authz "${_envfile}"
+	case "${?}" in
+		0)
+			autoenv_source "${_envfile}"
+			\return 0
+			;;
+		2)
+			\return 0
+			;;
+	esac
 	if [ -z "${MC_SID}" ]; then # Make sure mc is not running
 		\echo "autoenv:"
 		\echo "autoenv: WARNING:"
@@ -112,7 +120,7 @@ autoenv_deauthorize_env() {
 	\cp "${AUTOENV_AUTH_FILE}" "${AUTOENV_AUTH_FILE}.tmp"
 	_noclobber="$(set +o | \grep noclobber)"
 	set +C
-	\grep -Gv "${_envfile}:" "${AUTOENV_AUTH_FILE}.tmp" > "${AUTOENV_AUTH_FILE}"
+	\grep -Gv "^\\(\\|\\|y:\\|n:\\)${_envfile}:" "${AUTOENV_AUTH_FILE}.tmp" > "${AUTOENV_AUTH_FILE}"
 	\eval "${_noclobber}"
 	\rm "${AUTOENV_AUTH_FILE}.tmp" 2>/dev/null || :
 }
@@ -121,7 +129,7 @@ autoenv_authorize_env() {
 	local _envfile
 	_envfile="${1}"
 	autoenv_deauthorize_env "${_envfile}"
-	autoenv_hashline "${_envfile}" >> "${AUTOENV_AUTH_FILE}"
+	echo "y:${_envfile}:$(autoenv_hash "${_envfile}")" >> "${AUTOENV_AUTH_FILE}"
 }
 
 autoenv_source() {
